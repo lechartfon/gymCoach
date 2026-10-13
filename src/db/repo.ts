@@ -1,6 +1,13 @@
 import { randomUUID } from 'expo-crypto';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
+import {
+  normalizeExerciseKey,
+  resolveRoutineName,
+  type RoutineTransfer,
+  type RoutineWithItems,
+} from '@/logic/routineTransfer';
+
 import type {
   Exercise,
   ExerciseHistoryEntry,
@@ -924,4 +931,121 @@ export async function seedSampleData(db: SQLiteDatabase): Promise<void> {
       }
     }
   });
+}
+
+/* ------------------------ Compartir e importar rutinas ---------------------- */
+
+export async function getRoutinesTransferData(
+  db: SQLiteDatabase,
+  routineIds?: string[]
+): Promise<RoutineWithItems[]> {
+  const routines = await listRoutines(db);
+  const selected = routineIds ? routines.filter((routine) => routineIds.includes(routine.id)) : routines;
+
+  const transfers: RoutineWithItems[] = [];
+  for (const routine of selected) {
+    const items = await getRoutineItems(db, routine.id);
+    transfers.push({
+      name: routine.name,
+      items: items.map((item) => ({
+        name: item.exerciseName,
+        instructions: item.instructions,
+        targetSets: item.targetSets,
+        targetReps: item.targetReps,
+        restSeconds: item.restSeconds,
+      })),
+    });
+  }
+  return transfers;
+}
+
+export type RoutinesImportResult = {
+  routines: number;
+  newExercises: number;
+  reusedExercises: number;
+  names: string[];
+};
+
+/**
+ * Añade rutinas importadas como rutinas nuevas, sin tocar las existentes.
+ * Los ejercicios se reutilizan por nombre (sin distinguir mayúsculas) y se
+ * crean solo los que aún no existen.
+ */
+export async function importRoutines(
+  db: SQLiteDatabase,
+  transfers: RoutineTransfer[]
+): Promise<RoutinesImportResult> {
+  const result: RoutinesImportResult = {
+    routines: 0,
+    newExercises: 0,
+    reusedExercises: 0,
+    names: [],
+  };
+
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    const exerciseRows = await txn.getAllAsync<{ id: string; name: string }>('SELECT id, name FROM exercises');
+    const exerciseByKey = new Map<string, string>();
+    for (const row of exerciseRows) {
+      exerciseByKey.set(normalizeExerciseKey(row.name), row.id);
+    }
+
+    const routineRows = await txn.getAllAsync<{ name: string }>('SELECT name FROM routines');
+    const existingNames = new Set(routineRows.map((row) => row.name.trim().toLowerCase()));
+
+    const positionRow = await txn.getFirstAsync<{ next: number | null }>(
+      'SELECT MAX(position) + 1 AS next FROM routines'
+    );
+    let position = positionRow?.next ?? 0;
+    const now = Date.now();
+
+    for (const transfer of transfers) {
+      const routineName = resolveRoutineName(transfer.name, existingNames);
+      existingNames.add(routineName.toLowerCase());
+
+      const routineId = randomUUID();
+      await txn.runAsync(
+        'INSERT INTO routines (id, name, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+        [routineId, routineName, position, now, now]
+      );
+      position += 1;
+
+      let itemPosition = 0;
+      for (const exercise of transfer.exercises) {
+        const key = normalizeExerciseKey(exercise.name);
+        let exerciseId = exerciseByKey.get(key);
+
+        if (exerciseId) {
+          result.reusedExercises += 1;
+        } else {
+          exerciseId = randomUUID();
+          await txn.runAsync(
+            'INSERT INTO exercises (id, name, instructions, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+            [exerciseId, exercise.name.trim(), (exercise.instructions ?? '').trim(), now, now]
+          );
+          exerciseByKey.set(key, exerciseId);
+          result.newExercises += 1;
+        }
+
+        await txn.runAsync(
+          `INSERT INTO routine_exercises (id, routine_id, exercise_id, position, target_sets, target_reps, rest_seconds)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            randomUUID(),
+            routineId,
+            exerciseId,
+            itemPosition,
+            exercise.targetSets,
+            exercise.targetReps.trim(),
+            exercise.restSeconds,
+          ]
+        );
+        itemPosition += 1;
+      }
+
+      result.routines += 1;
+      result.names.push(routineName);
+    }
+  });
+
+  return result;
 }

@@ -9,6 +9,7 @@ Aplicación móvil para seguir tus rutinas de gimnasio, registrar los pesos de c
 - **Entrenamiento guiado**: ves el ejercicio actual con su explicación, marcas cada serie como completada, anotas el **peso en kg** y escribes notas libres por ejercicio. Pasas al siguiente con un botón.
 - **Temporizador de descanso opcional**: cuenta atrás configurable por ejercicio. Se inicia automáticamente al completar una serie (o manualmente), se puede pausar u omitir y **sigue siendo correcta si la app pasa a segundo plano** (sin notificaciones).
 - **Historial y progreso**: consulta todos los entrenamientos completados y la evolución de pesos y notas por ejercicio.
+- **Compartir e importar rutinas**: exporta todas tus rutinas o una concreta a un archivo JSON para compartirlas, e importa las de otra persona. Al importar se añaden como rutinas nuevas (los ejercicios se reutilizan por nombre) y nada de lo que ya tienes se modifica.
 - **Copia de seguridad y exportación**: exporta un JSON completo reimportable y un CSV del historial para abrirlo en una hoja de cálculo.
 - **Datos de ejemplo**: carga las rutinas A, B, C y D de muestra con un toque.
 
@@ -87,6 +88,40 @@ Al terminar, EAS muestra un enlace de descarga; instálalo en tu teléfono Andro
 1. `npm run typecheck`
 2. `npm test`
 3. `npm run lint`
+
+## Formato de las rutinas exportadas
+
+Los archivos de rutinas son JSON legibles (y editables a mano si quieres). Desde **Ajustes → Rutinas** puedes exportar todas, y desde el detalle de una rutina puedes compartir solo esa.
+
+```json
+{
+  "app": "gymCoach",
+  "type": "routines",
+  "version": 1,
+  "exportedAt": 1730000000000,
+  "routines": [
+    {
+      "name": "A",
+      "exercises": [
+        {
+          "name": "Sentadilla",
+          "instructions": "Baja con control",
+          "targetSets": 4,
+          "targetReps": "8",
+          "restSeconds": 120
+        }
+      ]
+    }
+  ]
+}
+```
+
+Reglas al importar:
+
+- Se añaden rutinas nuevas; las existentes no se tocan.
+- Si ya existe una rutina con el mismo nombre, se importa como `«A (importada)»`.
+- Los ejercicios se reutilizan por nombre (sin distinguir mayúsculas); solo se crean los que no existan.
+- Límites aceptados: 1-50 series, 0-3600 s de descanso y nombres de hasta 120 caracteres.
 
 ## Cómo se comporta el descanso en segundo plano
 

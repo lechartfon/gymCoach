@@ -17,6 +17,7 @@ import {
   deleteRoutine,
   getRoutine,
   getRoutineItems,
+  getRoutinesTransferData,
   moveRoutineItem,
   removeRoutineItem,
   renameRoutine,
@@ -24,7 +25,9 @@ import {
   updateRoutineItem,
 } from '@/db/repo';
 import type { Routine, RoutineExerciseItem } from '@/db/types';
+import { shareTextFile } from '@/logic/files';
 import { parsePositiveInt } from '@/logic/format';
+import { buildRoutinesPayload, routineFileSlug } from '@/logic/routineTransfer';
 import { colors, spacing } from '@/theme';
 
 export default function RoutineDetailScreen() {
@@ -124,6 +127,24 @@ export default function RoutineDetailScreen() {
         },
       },
     ]);
+  }
+
+  async function handleShare() {
+    if (!routine) {
+      return;
+    }
+    try {
+      const transfers = await getRoutinesTransferData(db, [routine.id]);
+      const payload = buildRoutinesPayload(transfers);
+      await shareTextFile({
+        fileName: `gymcoach-rutina-${routineFileSlug(routine.name)}.json`,
+        content: JSON.stringify(payload, null, 2),
+        mimeType: 'application/json',
+        dialogTitle: 'Compartir rutina',
+      });
+    } catch (error) {
+      Alert.alert('No se pudo compartir', error instanceof Error ? error.message : 'Error inesperado');
+    }
   }
 
   function handleDeleteRoutine() {
@@ -253,6 +274,7 @@ export default function RoutineDetailScreen() {
         title="Añadir ejercicio"
         onPress={() => router.push({ pathname: '/routine/[id]/add-exercise', params: { id: routine.id } })}
       />
+      <SecondaryButton title="Compartir rutina" onPress={handleShare} />
 
       <SectionTitle>Zona peligrosa</SectionTitle>
       <SecondaryButton title="Eliminar rutina" tone="danger" onPress={handleDeleteRoutine} />

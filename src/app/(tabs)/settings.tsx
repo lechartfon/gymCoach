@@ -5,9 +5,23 @@ import { useCallback, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { PrimaryButton, ScreenScroll, SecondaryButton, SectionTitle, uiStyles } from '@/components/ui';
-import { getExportPayload, importPayload, isValidExportPayload, listRoutines, seedSampleData, wipeAllData } from '@/db/repo';
+import {
+  getExportPayload,
+  getRoutinesTransferData,
+  importPayload,
+  importRoutines,
+  isValidExportPayload,
+  listRoutines,
+  seedSampleData,
+  wipeAllData,
+} from '@/db/repo';
 import { buildCsv, buildCsvRowsFromExport } from '@/logic/csv';
 import { pickJsonFile, shareTextFile } from '@/logic/files';
+import {
+  buildRoutinesPayload,
+  isValidRoutinesPayload,
+  summarizeRoutinesPayload,
+} from '@/logic/routineTransfer';
 import { colors, spacing } from '@/theme';
 
 export default function SettingsScreen() {
@@ -63,8 +77,7 @@ export default function SettingsScreen() {
     }
   }
 
-  async function handleImportJson() {
-    setBusy('import');
+  async function handleImportJson() {    setBusy('import');
     try {
       const content = await pickJsonFile();
       if (content === null) {
@@ -94,6 +107,82 @@ export default function SettingsScreen() {
               await importPayload(db, payload);
               await load();
               Alert.alert('Copia restaurada', 'Los datos se han restaurado correctamente.');
+            },
+          },
+        ]
+      );
+    } catch (error) {
+      Alert.alert('No se pudo importar', error instanceof Error ? error.message : 'Error inesperado');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleExportRoutines() {
+    setBusy('routines-export');
+    try {
+      const transfers = await getRoutinesTransferData(db);
+      if (transfers.length === 0) {
+        Alert.alert('Sin rutinas', 'Todavía no hay rutinas para exportar.');
+        return;
+      }
+      const payload = buildRoutinesPayload(transfers);
+      const date = new Date().toISOString().slice(0, 10);
+      await shareTextFile({
+        fileName: `gymcoach-rutinas-${date}.json`,
+        content: JSON.stringify(payload, null, 2),
+        mimeType: 'application/json',
+        dialogTitle: 'Compartir rutinas',
+      });
+    } catch (error) {
+      Alert.alert('No se pudo exportar', error instanceof Error ? error.message : 'Error inesperado');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleImportRoutines() {
+    setBusy('routines-import');
+    try {
+      const content = await pickJsonFile();
+      if (content === null) {
+        return;
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(content);
+      } catch {
+        Alert.alert('Archivo inválido', 'El archivo seleccionado no es un JSON válido.');
+        return;
+      }
+      if (!isValidRoutinesPayload(parsed)) {
+        Alert.alert('Archivo no reconocido', 'El archivo no contiene rutinas exportadas desde gymCoach.');
+        return;
+      }
+      const payload = parsed;
+      const summary = summarizeRoutinesPayload(payload);
+      if (summary.routines === 0) {
+        Alert.alert('Sin rutinas', 'El archivo no incluye ninguna rutina.');
+        return;
+      }
+      Alert.alert(
+        'Importar rutinas',
+        `Se añadirán ${summary.routines} ${summary.routines === 1 ? 'rutina' : 'rutinas'} con ${summary.exercises} ${summary.exercises === 1 ? 'ejercicio' : 'ejercicios'}. Tus rutinas actuales no se modifican. ¿Continuar?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Importar',
+            onPress: async () => {
+              try {
+                const result = await importRoutines(db, payload.routines);
+                await load();
+                Alert.alert(
+                  'Rutinas importadas',
+                  `Añadidas: ${result.names.join(', ')}.\nEjercicios nuevos: ${result.newExercises} · reutilizados: ${result.reusedExercises}.`
+                );
+              } catch (error) {
+                Alert.alert('No se pudo importar', error instanceof Error ? error.message : 'Error inesperado');
+              }
             },
           },
         ]
@@ -148,6 +237,24 @@ export default function SettingsScreen() {
         </Text>
         <PrimaryButton title="Exportar copia (JSON)" onPress={handleExportJson} loading={busy === 'json'} />
         <SecondaryButton title="Restaurar copia (JSON)" onPress={handleImportJson} disabled={busy !== null} />
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.title}>Rutinas</Text>
+        <Text style={uiStyles.dimText}>
+          Exporta tus rutinas para compartirlas con quien quieras, o importa rutinas de otra persona. Al importar se
+          añaden como rutinas nuevas y no se modifica nada de lo que ya tienes.
+        </Text>
+        <SecondaryButton
+          title="Exportar rutinas (JSON)"
+          onPress={handleExportRoutines}
+          disabled={busy !== null}
+        />
+        <SecondaryButton
+          title="Importar rutinas (JSON)"
+          onPress={handleImportRoutines}
+          disabled={busy !== null}
+        />
       </View>
 
       <View style={styles.card}>
